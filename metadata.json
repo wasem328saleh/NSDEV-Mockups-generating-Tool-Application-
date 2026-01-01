@@ -1,0 +1,7 @@
+{
+  "name": "NSDEV Mockups Generating Tool",
+  "description": "An integrated AI application for managing 128 design prompts, generating high-quality restaurant mockups using Gemini, and applying advanced logo effects.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

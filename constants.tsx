@@ -66,7 +66,7 @@ export const generateInitialPrompts = () => {
         category: cat,
         name: `تصميم ${CATEGORY_NAMES[cat]} رقم ${i}`,
         prompt: `High-quality, professional food mockup of a ${cat} dish, studio lighting, commercial photography style, clean background, photorealistic 8k.`,
-        logoPrompt: `Place for a restaurant brand logo on the packaging.`,
+        logoPrompt: `Integrate a modern, minimalist restaurant logo onto the front of the packaging, ensuring it looks naturally embossed or printed.`,
         description: `تصميم احترافي لقسم ${CATEGORY_NAMES[cat]}`,
         status: 'pending',
         metadata: {

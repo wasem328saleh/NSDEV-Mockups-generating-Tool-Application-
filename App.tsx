@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Play, Pause, FastForward, Trash2, Settings, Image as ImageIcon, 
   CheckCircle2, AlertCircle, Loader2, Download, Filter, Layers, 
-  LayoutGrid, Edit2, RotateCcw, FileJson, Key, Sliders, ExternalLink
+  LayoutGrid, Edit2, RotateCcw, FileJson, Key, Sliders, ExternalLink, Type, PlusCircle, Upload, Trash
 } from 'lucide-react';
 import { 
   DesignPrompt, 
@@ -23,8 +23,6 @@ import {
 import { storageService } from './services/storageService';
 import { geminiService } from './services/geminiService';
 import { imageProcessor } from './services/imageProcessor';
-
-// Removed redundant window.aistudio declaration to avoid conflict with existing global AIStudio type definition
 
 const NavItem: React.FC<{ 
   label: string; 
@@ -50,7 +48,6 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>(() => {
     const savedSettings = storageService.getSettings() || DEFAULT_SETTINGS;
     const savedLogos = storageService.getLogoLibrary();
-    // In a real scenario we'd load prompts from storage too
     return {
       settings: savedSettings,
       prompts: generateInitialPrompts(),
@@ -67,6 +64,18 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'prompts' | 'gallery' | 'control'>('prompts');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<DesignPrompt | null>(null);
+  
+  // New Management UI states
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newPromptData, setNewPromptData] = useState<Partial<DesignPrompt>>({
+    category: 'pizza',
+    name: '',
+    prompt: '',
+    logoPrompt: '',
+    description: ''
+  });
+  const [bulkImportMode, setBulkImportMode] = useState<'append' | 'overwrite'>('append');
+  const [categoryLogoUpdate, setCategoryLogoUpdate] = useState<{cat: Category, prompt: string}>({ cat: 'pizza', prompt: '' });
 
   // Sync state to storage
   useEffect(() => {
@@ -101,9 +110,8 @@ const App: React.FC = () => {
 
   const handleApiKeySelect = async () => {
     try {
-      // @ts-ignore - window.aistudio is declared globally as AIStudio in the environment
+      // @ts-ignore
       await window.aistudio.openSelectKey();
-      // Proceed immediately as per race condition instructions
       setShowSettings(false);
     } catch (e) {
       setErrorMsg("فشل في اختيار مفتاح API");
@@ -111,12 +119,10 @@ const App: React.FC = () => {
   };
 
   const generateSingle = async (index: number) => {
-    // Check if Pro is selected but no key (using env.API_KEY injected automatically)
-    // For standard Flash, user can also provide their own key in the input
     const currentApiKey = state.settings.apiKey || (process.env.API_KEY as string);
     
     if (!currentApiKey && state.settings.model === 'gemini-3-pro-image-preview') {
-      // @ts-ignore - window.aistudio is declared globally as AIStudio in the environment
+      // @ts-ignore
       const hasKey = await window.aistudio.hasSelectedApiKey();
       if (!hasKey) {
         setErrorMsg("يجب اختيار مفتاح API لموديل Pro أولاً.");
@@ -133,8 +139,10 @@ const App: React.FC = () => {
     }));
 
     try {
+      const combinedPrompt = `${promptToProcess.prompt}. ${promptToProcess.logoPrompt || ''}`;
+
       const baseImage = await geminiService.generateMockup(
-        promptToProcess.prompt, 
+        combinedPrompt, 
         currentApiKey, 
         state.settings.imageQuality,
         state.settings.model,
@@ -211,12 +219,122 @@ const App: React.FC = () => {
     }
   };
 
+  const clearAllPrompts = () => {
+    if (confirm("هل أنت متأكد من مسح جميع البرومبتات؟ لا يمكن التراجع عن هذه الخطوة.")) {
+      setState(prev => ({ ...prev, prompts: [], currentIndex: 0, isGenerating: false }));
+    }
+  };
+
   const updatePrompt = (updated: DesignPrompt) => {
     setState(prev => ({
       ...prev,
       prompts: prev.prompts.map(p => p.id === updated.id ? updated : p)
     }));
     setEditingPrompt(null);
+  };
+
+  const removePrompt = (id: string) => {
+    if (confirm("حذف هذا البرومبت؟")) {
+      setState(prev => ({
+        ...prev,
+        prompts: prev.prompts.filter(p => p.id !== id)
+      }));
+    }
+  };
+
+  const addIndividualPrompt = () => {
+    if (!newPromptData.prompt) {
+      alert("البرومبت الرئيسي مطلوب");
+      return;
+    }
+
+    const prompt: DesignPrompt = {
+      id: `custom-${Date.now()}`,
+      category: newPromptData.category as Category || 'pizza',
+      name: newPromptData.name || `تصميم جديد ${state.prompts.length + 1}`,
+      prompt: newPromptData.prompt!,
+      logoPrompt: newPromptData.logoPrompt || '',
+      description: newPromptData.description || '',
+      status: 'pending',
+      metadata: {
+        dimensions: '1024x1024',
+        style: 'professional',
+        estimatedTime: 45,
+        priority: 'medium'
+      }
+    };
+
+    setState(prev => ({
+      ...prev,
+      prompts: [...prev.prompts, prompt]
+    }));
+    setShowAddModal(false);
+    setNewPromptData({ category: 'pizza', name: '', prompt: '', logoPrompt: '', description: '' });
+  };
+
+  const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (!Array.isArray(json)) throw new Error("الملف يجب أن يحتوي على مصفوفة JSON");
+
+        const validPrompts: DesignPrompt[] = json
+          .filter(item => item.prompt) // Mandatory prompt check
+          .map(item => ({
+            id: item.id || `${item.category || 'pizza'}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            category: (['pizza', 'burger', 'shawarma', 'chicken', 'desserts'].includes(item.category) ? item.category : 'pizza') as Category,
+            name: item.name || `مستورد ${Date.now()}`,
+            prompt: item.prompt,
+            logoPrompt: item.logoPrompt || '',
+            description: item.description || '',
+            status: 'pending',
+            metadata: item.metadata || {
+              dimensions: '1024x1024',
+              style: 'professional',
+              estimatedTime: 45,
+              priority: 'medium'
+            }
+          }));
+
+        if (validPrompts.length === 0) {
+          alert("لم يتم العثور على برومبتات صالحة في الملف");
+          return;
+        }
+
+        setState(prev => ({
+          ...prev,
+          prompts: bulkImportMode === 'overwrite' ? validPrompts : [...prev.prompts, ...validPrompts]
+        }));
+        
+        alert(`تم استيراد ${validPrompts.length} برومبت بنجاح`);
+      } catch (err) {
+        alert("خطأ في قراءة ملف JSON: " + (err as Error).message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset for next import
+  };
+
+  const applyCategoryLogoPrompt = () => {
+    if (!categoryLogoUpdate.prompt) {
+      alert("الرجاء إدخال برومبت اللوغو");
+      return;
+    }
+    if (confirm(`هل تريد تحديث برومبت اللوغو لجميع التصاميم في قسم ${CATEGORY_NAMES[categoryLogoUpdate.cat]}؟`)) {
+      setState(prev => ({
+        ...prev,
+        prompts: prev.prompts.map(p => 
+          p.category === categoryLogoUpdate.cat 
+            ? { ...p, logoPrompt: categoryLogoUpdate.prompt } 
+            : p
+        )
+      }));
+      alert("تم التحديث بنجاح");
+    }
   };
 
   const exportPrompts = () => {
@@ -437,85 +555,174 @@ const App: React.FC = () => {
 
             <div className="p-4 min-h-[600px]">
               {activeTab === 'prompts' && (
-                <div className="grid grid-cols-1 gap-3">
-                  {filteredPrompts.slice(0, 100).map((p, idx) => {
-                    const globalIdx = state.prompts.indexOf(p);
-                    return (
-                      <div 
-                        key={p.id}
-                        className={`group p-4 rounded-2xl border transition-all hover:shadow-md flex items-center gap-4 ${
-                          state.currentIndex === globalIdx ? 'border-blue-200 bg-blue-50/30 ring-2 ring-blue-100' : 'border-slate-100 bg-white'
-                        }`}
-                      >
+                <div className="flex flex-col gap-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="font-bold text-slate-800">إجمالي التصاميم: {filteredPrompts.length}</h3>
+                    <button 
+                      onClick={() => setShowAddModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all active:scale-95 shadow-md"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      إضافة تصميم جديد
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3">
+                    {filteredPrompts.slice(0, 100).map((p, idx) => {
+                      const globalIdx = state.prompts.indexOf(p);
+                      return (
                         <div 
-                          className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm"
-                          style={{ backgroundColor: CATEGORY_COLORS[p.category] }}
+                          key={p.id}
+                          className={`group p-4 rounded-2xl border transition-all hover:shadow-md flex items-center gap-4 ${
+                            state.currentIndex === globalIdx ? 'border-blue-200 bg-blue-50/30 ring-2 ring-blue-100' : 'border-slate-100 bg-white'
+                          }`}
                         >
-                          <span className="font-bold text-xs">{globalIdx + 1}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-bold text-slate-800 text-sm truncate">{p.name}</h3>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              p.status === 'completed' ? 'bg-green-100 text-green-700' : 
-                              p.status === 'failed' ? 'bg-red-100 text-red-700' : 
-                              p.status === 'generating' ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              {p.status === 'completed' ? 'تم الانتهاء' : p.status === 'pending' ? 'بانتظار البدء' : p.status === 'failed' ? 'فشل' : 'جاري العمل...'}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 truncate italic">{p.prompt}</p>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button 
-                            onClick={() => setEditingPrompt(p)}
-                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+                          <div 
+                            className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm"
+                            style={{ backgroundColor: CATEGORY_COLORS[p.category] }}
                           >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          {p.status === 'generating' ? (
-                            <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-                          ) : (
+                            <span className="font-bold text-xs">{globalIdx + 1}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-bold text-slate-800 text-sm truncate">{p.name}</h3>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                p.status === 'completed' ? 'bg-green-100 text-green-700' : 
+                                p.status === 'failed' ? 'bg-red-100 text-red-700' : 
+                                p.status === 'generating' ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-slate-100 text-slate-500'
+                              }`}>
+                                {p.status === 'completed' ? 'تم الانتهاء' : p.status === 'pending' ? 'بانتظار البدء' : p.status === 'failed' ? 'فشل' : 'جاري العمل...'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 truncate italic">{p.prompt}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
                             <button 
-                              onClick={() => generateSingle(globalIdx)}
-                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500 transition-colors"
+                              onClick={() => setEditingPrompt(p)}
+                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
                             >
-                              <Play className="w-4 h-4" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                          )}
+                            <button 
+                              onClick={() => removePrompt(p.id)}
+                              className="p-2 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash className="w-4 h-4" />
+                            </button>
+                            {p.status === 'generating' ? (
+                              <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                            ) : (
+                              <button 
+                                onClick={() => generateSingle(globalIdx)}
+                                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500 transition-colors"
+                              >
+                                <Play className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
               {activeTab === 'control' && (
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-8">
+                  {/* Bulk Actions */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
-                      <h4 className="font-bold text-slate-800 mb-2">إعادة تعيين الحالة</h4>
-                      <p className="text-xs text-slate-500 mb-4">يمكنك إعادة تعيين برومبتات معينة للبدء من جديد</p>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => resetAll('failed')} className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-xs font-bold hover:bg-red-200">إعادة الفاشل</button>
-                        <button onClick={() => resetAll('completed')} className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-bold hover:bg-green-200">إعادة المكتمل</button>
-                        <button onClick={() => resetAll('pending')} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200">إعادة المعلق</button>
+                      <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                        <Upload className="w-4 h-4 text-blue-600" />
+                        استيراد برومبتات (JSON)
+                      </h4>
+                      <p className="text-xs text-slate-500 mb-4">ارفع ملف JSON يحتوي على مجموعة من البرومبتات.</p>
+                      
+                      <div className="flex items-center gap-4 mb-4 text-xs font-bold">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input 
+                            type="radio" name="importMode" value="append" 
+                            checked={bulkImportMode === 'append'} 
+                            onChange={() => setBulkImportMode('append')}
+                            className="accent-blue-600"
+                          />
+                          إضافة للبرومبتات الحالية
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input 
+                            type="radio" name="importMode" value="overwrite" 
+                            checked={bulkImportMode === 'overwrite'} 
+                            onChange={() => setBulkImportMode('overwrite')}
+                            className="accent-red-600"
+                          />
+                          مسح الكل والاستبدال
+                        </label>
+                      </div>
+
+                      <label className="block w-full cursor-pointer">
+                        <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:bg-white transition-all">
+                          <FileJson className="w-8 h-8 mx-auto mb-2 text-slate-400" />
+                          <p className="text-xs font-bold text-slate-600">اختر ملف JSON للرفع</p>
+                        </div>
+                        <input type="file" accept=".json" onChange={handleBulkImport} className="hidden" />
+                      </label>
+                    </div>
+
+                    <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                      <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                        إدارة شاملة
+                      </h4>
+                      <p className="text-xs text-slate-500 mb-4">أوامر سريعة للتحكم في قاعدة بيانات البرومبتات.</p>
+                      <div className="flex flex-col gap-3">
+                        <button 
+                          onClick={clearAllPrompts}
+                          className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm transition-all active:scale-95 shadow-md flex items-center justify-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          مسح جميع البرومبتات نهائياً
+                        </button>
+                        <button 
+                          onClick={() => resetAll('pending')}
+                          className="w-full py-3 border-2 border-slate-200 hover:bg-white text-slate-600 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-2"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          إعادة تعيين الجميع لحالة "معلق"
+                        </button>
                       </div>
                     </div>
-                    <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
-                      <h4 className="font-bold text-slate-800 mb-2">تخصيص سريع</h4>
-                      <p className="text-xs text-slate-500 mb-4">تحكم في المعاملات التقنية للبرومبتات الحالية</p>
-                      <div className="space-y-3">
-                         <div className="flex items-center justify-between text-xs">
-                           <span>توقف عند الخطأ</span>
-                           <button 
-                             onClick={() => setState(prev => ({ ...prev, settings: { ...prev.settings, pauseOnError: !prev.settings.pauseOnError } }))}
-                             className={`w-10 h-5 rounded-full transition-all relative ${state.settings.pauseOnError ? 'bg-blue-600' : 'bg-slate-300'}`}
-                           >
-                             <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${state.settings.pauseOnError ? 'right-0.5' : 'left-0.5'}`}></div>
-                           </button>
-                         </div>
-                      </div>
+                  </div>
+
+                  {/* Standardized Category Pilot */}
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                    <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                      <Type className="w-4 h-4 text-purple-600" />
+                      تحديث موحد للوغو (حسب القسم)
+                    </h4>
+                    <p className="text-xs text-slate-500 mb-4">قم بتغيير برومبت اللوغو لجميع التصاميم في قسم معين بضغطة واحدة.</p>
+                    
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <select 
+                        value={categoryLogoUpdate.cat}
+                        onChange={(e) => setCategoryLogoUpdate({...categoryLogoUpdate, cat: e.target.value as Category})}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold"
+                      >
+                        {Object.entries(CATEGORY_NAMES).map(([key, label]) => (
+                          <option key={key} value={key}>{label}</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="text"
+                        value={categoryLogoUpdate.prompt}
+                        onChange={(e) => setCategoryLogoUpdate({...categoryLogoUpdate, prompt: e.target.value})}
+                        placeholder="أدخل برومبت اللوغو الجديد هنا..."
+                        className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-sm"
+                      />
+                      <button 
+                        onClick={applyCategoryLogoPrompt}
+                        className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm shadow-md transition-all active:scale-95"
+                      >
+                        تحديث القسم
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -556,10 +763,86 @@ const App: React.FC = () => {
         </section>
       </main>
 
+      {/* Add Individual Prompt Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
+            <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+               <h3 className="font-bold flex items-center gap-2">
+                 <PlusCircle className="w-5 h-5 text-blue-400" />
+                 إضافة تصميم جديد
+               </h3>
+               <button onClick={() => setShowAddModal(false)} className="p-1 rounded-full hover:bg-white/10 transition-colors">
+                 <Trash2 className="w-5 h-5 rotate-45" />
+               </button>
+             </div>
+             <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scroll">
+               <div className="grid grid-cols-2 gap-4">
+                 <div className="col-span-2 sm:col-span-1">
+                   <label className="text-xs font-bold text-slate-500 mb-1 block">القسم</label>
+                   <select 
+                     value={newPromptData.category}
+                     onChange={(e) => setNewPromptData({...newPromptData, category: e.target.value as Category})}
+                     className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none font-bold text-sm"
+                   >
+                     {Object.entries(CATEGORY_NAMES).map(([key, label]) => (
+                       <option key={key} value={key}>{label}</option>
+                     ))}
+                   </select>
+                 </div>
+                 <div className="col-span-2 sm:col-span-1">
+                   <label className="text-xs font-bold text-slate-500 mb-1 block">اسم التصميم</label>
+                   <input 
+                     type="text" value={newPromptData.name} 
+                     onChange={(e) => setNewPromptData({ ...newPromptData, name: e.target.value })}
+                     placeholder="مثلاً: برجر كلاسيك"
+                     className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none"
+                   />
+                 </div>
+               </div>
+               <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">البرومبت الرئيسي (Mockup Prompt)</label>
+                 <textarea 
+                   rows={3} value={newPromptData.prompt} 
+                   onChange={(e) => setNewPromptData({ ...newPromptData, prompt: e.target.value })}
+                   className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none text-sm font-mono"
+                   placeholder="Describe the packaging mockup in English..."
+                 />
+               </div>
+               <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">برومبت اللوغو (Logo Prompt)</label>
+                 <textarea 
+                   rows={2} value={newPromptData.logoPrompt} 
+                   onChange={(e) => setNewPromptData({ ...newPromptData, logoPrompt: e.target.value })}
+                   className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none text-sm font-mono"
+                   placeholder="Describe the logo to integrate..."
+                 />
+               </div>
+               <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">وصف التصميم (بالعربية)</label>
+                 <input 
+                   type="text" value={newPromptData.description} 
+                   onChange={(e) => setNewPromptData({ ...newPromptData, description: e.target.value })}
+                   className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none"
+                 />
+               </div>
+               <div className="grid grid-cols-1 pt-2">
+                 <button 
+                   onClick={addIndividualPrompt}
+                   className="py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95"
+                 >
+                   إضافة للقائمة
+                 </button>
+               </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Prompt Modal */}
       {editingPrompt && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-           <div className="bg-white w-full max-lg rounded-3xl shadow-2xl overflow-hidden">
+           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
              <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
                <h3 className="font-bold flex items-center gap-2">
                  <Edit2 className="w-5 h-5 text-blue-400" />
@@ -569,7 +852,7 @@ const App: React.FC = () => {
                  <RotateCcw className="w-5 h-5 rotate-45" />
                </button>
              </div>
-             <div className="p-6 space-y-4">
+             <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scroll">
                <div>
                  <label className="text-xs font-bold text-slate-500 mb-1 block">اسم التصميم</label>
                  <input 
@@ -579,14 +862,28 @@ const App: React.FC = () => {
                  />
                </div>
                <div>
-                 <label className="text-xs font-bold text-slate-500 mb-1 block">البرومبت الرئيسي</label>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block flex items-center gap-1">
+                   <ImageIcon className="w-3 h-3" /> برومبت التصميم الرئيسي
+                 </label>
                  <textarea 
-                   rows={4} value={editingPrompt.prompt} 
+                   rows={3} value={editingPrompt.prompt} 
                    onChange={(e) => setEditingPrompt({ ...editingPrompt, prompt: e.target.value })}
                    className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none focus:ring-2 ring-blue-500/20 text-sm font-mono"
                  />
                </div>
-               <div className="grid grid-cols-2 gap-4">
+               <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block flex items-center gap-1">
+                   <Type className="w-3 h-3" /> برومبت الشعار المدمج (Logo Prompt)
+                 </label>
+                 <textarea 
+                   rows={2} value={editingPrompt.logoPrompt || ''} 
+                   onChange={(e) => setEditingPrompt({ ...editingPrompt, logoPrompt: e.target.value })}
+                   className="w-full px-4 py-2 bg-slate-50 border rounded-xl outline-none focus:ring-2 ring-blue-500/20 text-sm font-mono"
+                   placeholder="مثلاً: Place a minimal circular logo with a white chef icon on the package..."
+                 />
+                 <p className="text-[10px] text-slate-400 mt-1 italic">سيتم دمج هذا البرومبت مع التصميم الرئيسي للحصول على شعار مدمج بتقنية AI.</p>
+               </div>
+               <div className="grid grid-cols-2 gap-4 pt-2">
                  <button 
                    onClick={() => updatePrompt(editingPrompt)}
                    className="py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95"

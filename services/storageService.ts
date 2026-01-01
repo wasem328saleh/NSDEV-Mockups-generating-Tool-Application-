@@ -12,6 +12,15 @@ export const storageService = {
     return saved ? JSON.parse(saved) : null;
   },
 
+  saveCategories: (categories: any[]) => {
+    localStorage.setItem('nsdev_categories', JSON.stringify(categories));
+  },
+
+  getCategories: (): any[] | null => {
+    const saved = localStorage.getItem('nsdev_categories');
+    return saved ? JSON.parse(saved) : null;
+  },
+
   saveLogoLibrary: (logos: string[]) => {
     localStorage.setItem('nsdev_logos', JSON.stringify(logos));
   },
@@ -60,5 +69,6 @@ export const storageService = {
     tx.objectStore(STORE_NAME).clear();
     localStorage.removeItem('nsdev_settings');
     localStorage.removeItem('nsdev_logos');
+    localStorage.removeItem('nsdev_categories');
   }
 };

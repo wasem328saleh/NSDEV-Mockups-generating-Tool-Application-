@@ -1,21 +1,13 @@
 
-import { Category, LogoEffects, AppSettings } from './types';
+import { CategoryInfo, LogoEffects, AppSettings } from './types';
 
-export const CATEGORY_COLORS: Record<Category, string> = {
-  pizza: '#e74c3c',
-  burger: '#d35400',
-  shawarma: '#f39c12',
-  chicken: '#27ae60',
-  desserts: '#9b59b6',
-};
-
-export const CATEGORY_NAMES: Record<Category, string> = {
-  pizza: 'بيتزا',
-  burger: 'برجر',
-  shawarma: 'شاورما',
-  chicken: 'دجاج',
-  desserts: 'حلويات',
-};
+export const INITIAL_CATEGORIES: CategoryInfo[] = [
+  { id: 'pizza', name: 'بيتزا', color: '#e74c3c' },
+  { id: 'burger', name: 'برجر', color: '#d35400' },
+  { id: 'shawarma', name: 'شاورما', color: '#f39c12' },
+  { id: 'chicken', name: 'دجاج', color: '#27ae60' },
+  { id: 'desserts', name: 'حلويات', color: '#9b59b6' },
+];
 
 export const DEFAULT_LOGO_EFFECTS: LogoEffects = {
   size: 20,
@@ -54,20 +46,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pauseOnError: true,
 };
 
-export const generateInitialPrompts = () => {
-  const categories: Category[] = ['pizza', 'burger', 'shawarma', 'chicken', 'desserts'];
-  const counts = { pizza: 30, burger: 23, shawarma: 24, chicken: 23, desserts: 28 };
+export const generateInitialPrompts = (categories: CategoryInfo[]) => {
   const prompts: any[] = [];
+  const counts: Record<string, number> = { pizza: 30, burger: 23, shawarma: 24, chicken: 23, desserts: 28 };
 
   categories.forEach(cat => {
-    for (let i = 1; i <= (counts[cat] || 25); i++) {
+    const count = counts[cat.id] || 25;
+    for (let i = 1; i <= count; i++) {
       prompts.push({
-        id: `${cat}-${i.toString().padStart(3, '0')}`,
-        category: cat,
-        name: `تصميم ${CATEGORY_NAMES[cat]} رقم ${i}`,
-        prompt: `High-quality, professional food mockup of a ${cat} dish, studio lighting, commercial photography style, clean background, photorealistic 8k.`,
+        id: `${cat.id}-${i.toString().padStart(3, '0')}`,
+        category: cat.id,
+        name: `تصميم ${cat.name} رقم ${i}`,
+        prompt: `High-quality, professional food mockup of a ${cat.id} dish, studio lighting, commercial photography style, clean background, photorealistic 8k.`,
         logoPrompt: `Integrate a modern, minimalist restaurant logo onto the front of the packaging, ensuring it looks naturally embossed or printed.`,
-        description: `تصميم احترافي لقسم ${CATEGORY_NAMES[cat]}`,
+        description: `تصميم احترافي لقسم ${cat.name}`,
         status: 'pending',
         metadata: {
           dimensions: '1024x1024',

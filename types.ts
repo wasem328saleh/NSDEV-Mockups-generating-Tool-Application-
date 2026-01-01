@@ -1,5 +1,11 @@
 
-export type Category = 'pizza' | 'burger' | 'shawarma' | 'chicken' | 'desserts';
+export interface CategoryInfo {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export type Category = string;
 
 export interface PromptMetadata {
   dimensions: string;
@@ -63,6 +69,7 @@ export interface AppSettings {
 
 export interface AppState {
   settings: AppSettings;
+  categories: CategoryInfo[];
   prompts: DesignPrompt[];
   currentIndex: number;
   isGenerating: boolean;

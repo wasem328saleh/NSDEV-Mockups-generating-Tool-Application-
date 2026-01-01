@@ -45,13 +45,20 @@ export interface LogoEffects {
   };
 }
 
+export type ImageModel = 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
+export type AspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+
 export interface AppSettings {
   apiKey: string;
+  model: ImageModel;
+  aspectRatio: AspectRatio;
+  seed: number | null;
   autoSave: boolean;
   autoGenerate: boolean;
   delayBetweenGenerations: number;
   imageQuality: '1K' | '2K' | '4K';
   theme: 'light' | 'dark';
+  pauseOnError: boolean;
 }
 
 export interface AppState {

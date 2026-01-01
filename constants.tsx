@@ -43,15 +43,17 @@ export const DEFAULT_LOGO_EFFECTS: LogoEffects = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
+  model: 'gemini-2.5-flash-image',
+  aspectRatio: '1:1',
+  seed: null,
   autoSave: true,
   autoGenerate: false,
   delayBetweenGenerations: 3000,
   imageQuality: '1K',
   theme: 'light',
+  pauseOnError: true,
 };
 
-// Sample data for 128 prompts - In a real app these would be loaded from JSON
-// We'll generate a programmatic baseline for this demo
 export const generateInitialPrompts = () => {
   const categories: Category[] = ['pizza', 'burger', 'shawarma', 'chicken', 'desserts'];
   const counts = { pizza: 30, burger: 23, shawarma: 24, chicken: 23, desserts: 28 };

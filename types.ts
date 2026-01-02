@@ -25,13 +25,27 @@ export interface DesignPrompt {
   resultImageUrl?: string;
   error?: string;
   metadata: PromptMetadata;
-  selected: boolean; // Added for Phase 4 selection management
+  selected: boolean;
+}
+
+// مكونات البرومبت الذكية
+export interface TemplateComponent {
+  id: string;
+  label: string;
+  snippet: string;
+}
+
+export interface PromptTemplate {
+  subjects: TemplateComponent[];
+  environments: TemplateComponent[];
+  lightings: TemplateComponent[];
+  styles: TemplateComponent[];
 }
 
 export interface LogoEffects {
-  size: number; // 5 to 40
-  opacity: number; // 20 to 100
-  rotation: number; // 0 to 360
+  size: number;
+  opacity: number;
+  rotation: number;
   position: 'top-left' | 'top-center' | 'top-right' | 'middle-left' | 'middle-center' | 'middle-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
   shadow: {
     enabled: boolean;
@@ -72,9 +86,10 @@ export interface AppState {
   settings: AppSettings;
   categories: CategoryInfo[];
   prompts: DesignPrompt[];
+  template: PromptTemplate; // النظام الجديد للقوالب
   currentIndex: number;
   isGenerating: boolean;
-  activeLogo: string | null; // Base64 string
+  activeLogo: string | null;
   logoLibrary: string[];
   logoEffects: LogoEffects;
 }

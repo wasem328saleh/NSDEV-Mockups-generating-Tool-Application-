@@ -1,5 +1,5 @@
 
-import { CategoryInfo, LogoEffects, AppSettings, DesignPrompt } from './types';
+import { CategoryInfo, LogoEffects, AppSettings, DesignPrompt, PromptTemplate } from './types';
 
 export const INITIAL_CATEGORIES: CategoryInfo[] = [
   { id: 'pizza', name: 'بيتزا', color: '#e74c3c' },
@@ -8,6 +8,31 @@ export const INITIAL_CATEGORIES: CategoryInfo[] = [
   { id: 'chicken', name: 'دجاج', color: '#27ae60' },
   { id: 'desserts', name: 'حلويات', color: '#9b59b6' },
 ];
+
+export const DEFAULT_TEMPLATE: PromptTemplate = {
+  subjects: [
+    { id: '1', label: 'صندوق بيتزا كرتوني', snippet: 'A professional cardboard pizza box packaging' },
+    { id: '2', label: 'كوب قهوة ورقي', snippet: 'A premium disposable paper coffee cup' },
+    { id: '3', label: 'كيس شاورما ورقي', snippet: 'A clean white paper shawarma wrap bag' },
+    { id: '4', label: 'علبة برجر ورقية', snippet: 'An eco-friendly burger clamshell container' }
+  ],
+  environments: [
+    { id: '1', label: 'طاولة خشبية ريفية', snippet: 'placed on a rustic textured oak wood table' },
+    { id: '2', label: 'مطبخ عصري أبيض', snippet: 'sitting on a minimalist white marble kitchen counter' },
+    { id: '3', label: 'إضاءة ستوديو داكنة', snippet: 'isolated on a dark slate background with dramatic contrast' },
+    { id: '4', label: 'خلفية ملونة باستيل', snippet: 'on a solid pastel soft blue surface with soft shadows' }
+  ],
+  lightings: [
+    { id: '1', label: 'إضاءة سينمائية', snippet: 'cinematic side lighting, long soft shadows' },
+    { id: '2', label: 'ضوء النهار الطبيعي', snippet: 'natural bright sunlight coming from a window, fresh atmosphere' },
+    { id: '3', label: 'إضاءة نيون', snippet: 'cyberpunk style neon blue and purple rim lighting' }
+  ],
+  styles: [
+    { id: '1', label: 'تصوير تجاري', snippet: 'commercial food photography, high-end catalog style' },
+    { id: '2', label: 'واقعية فائقة', snippet: 'hyper-realistic 8k, ultra-detailed texture, photorealistic' },
+    { id: '3', label: 'حد أدنى', snippet: 'minimalist product shot, clean composition' }
+  ]
+};
 
 export const DEFAULT_LOGO_EFFECTS: LogoEffects = {
   size: 20,

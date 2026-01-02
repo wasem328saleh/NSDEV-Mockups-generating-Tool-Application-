@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Play, Pause, FastForward, Trash2, Settings, Image as ImageIcon, 
   CheckCircle2, AlertCircle, Loader2, Download, Filter, Layers, 
-  LayoutGrid, Edit2, RotateCcw, FileJson, Key, Sliders, ExternalLink, Type, PlusCircle, Upload, Trash, Palette, DownloadCloud, Check, FlaskConical
+  LayoutGrid, Edit2, RotateCcw, FileJson, Key, Sliders, ExternalLink, Type, PlusCircle, Upload, Trash, Palette, DownloadCloud, Check, FlaskConical, Sparkles, Wand2, Info, Clock
 } from 'lucide-react';
 import { 
   DesignPrompt, 
@@ -11,13 +12,15 @@ import {
   AppState, 
   LogoEffects,
   AspectRatio,
-  ImageModel
+  ImageModel,
+  TemplateComponent
 } from './types';
 import { 
   INITIAL_CATEGORIES,
   DEFAULT_LOGO_EFFECTS, 
   DEFAULT_SETTINGS, 
-  generateInitialPrompts 
+  generateInitialPrompts,
+  DEFAULT_TEMPLATE
 } from './constants';
 import { storageService } from './services/storageService';
 import { geminiService } from './services/geminiService';
@@ -53,6 +56,7 @@ const App: React.FC = () => {
       settings: savedSettings,
       categories: savedCategories,
       prompts: generateInitialPrompts(savedCategories),
+      template: DEFAULT_TEMPLATE,
       currentIndex: 0,
       isGenerating: false,
       activeLogo: savedLogos[0] || null,
@@ -63,12 +67,21 @@ const App: React.FC = () => {
 
   const [filter, setFilter] = useState<Category | 'all'>('all');
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<'prompts' | 'gallery' | 'control'>('prompts');
+  const [activeTab, setActiveTab] = useState<'prompts' | 'gallery' | 'control' | 'lab'>('prompts');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<DesignPrompt | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   
+  const [labSelection, setLabSelection] = useState({
+    subject: '',
+    environment: '',
+    lighting: '',
+    style: '',
+    logoPrompt: 'Integrate the logo naturally onto the primary packaging surface.',
+    category: 'pizza'
+  });
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [newPromptData, setNewPromptData] = useState<Partial<DesignPrompt>>({
     category: state.categories[0]?.id || '',
@@ -175,10 +188,9 @@ const App: React.FC = () => {
     }));
 
     try {
-      // Logic for merging prompt and logoPrompt as requested
-      const combinedPrompt = `${promptToProcess.prompt}. ${promptToProcess.logoPrompt || ''}`;
+      const finalPrompt = `${promptToProcess.prompt}. ${promptToProcess.logoPrompt || ''}`.trim();
       const baseImage = await geminiService.generateMockup(
-        combinedPrompt, 
+        finalPrompt, 
         currentApiKey, 
         state.settings.imageQuality,
         state.settings.model, 
@@ -201,31 +213,62 @@ const App: React.FC = () => {
       }));
     } catch (err: any) {
       console.error(err);
+      
+      let displayError = err.message;
       if (err.message === "KEY_RESET_REQUIRED") {
         setErrorMsg("انتهت صلاحية مفتاح API أو المشروع غير صالح. يرجى إعادة اختيار مفتاح نشط.");
         setShowSettings(true);
         setState(prev => ({ ...prev, isGenerating: false }));
+      } else if (err.message === "QUOTA_EXHAUSTED") {
+        displayError = "تم تجاوز حصة الاستخدام (Quota). يرجى المحاولة لاحقاً أو زيادة التأخير الزمني.";
+        setErrorMsg("لقد تجاوزت الحصة المتاحة. تم إيقاف التوليد التلقائي لتجنب تكرار الخطأ.");
+        setState(prev => ({ ...prev, isGenerating: false }));
       }
+
       setState(prev => ({
         ...prev,
-        isGenerating: state.settings.pauseOnError ? false : prev.isGenerating,
-        prompts: prev.prompts.map((p, i) => i === index ? { ...p, status: 'failed', error: err.message } : p)
+        prompts: prev.prompts.map((p, i) => i === index ? { ...p, status: 'failed', error: displayError } : p)
       }));
     }
   };
 
+  const generateFromLab = () => {
+    const { subject, environment, lighting, style, logoPrompt, category } = labSelection;
+    if (!subject || !environment) return alert("يرجى اختيار العنصر والبيئة على الأقل");
+
+    const subjectText = state.template.subjects.find(s => s.id === subject)?.snippet;
+    const envText = state.template.environments.find(e => e.id === environment)?.snippet;
+    const lightText = state.template.lightings.find(l => l.id === lighting)?.snippet || '';
+    const styleText = state.template.styles.find(s => s.id === style)?.snippet || '';
+
+    const finalPromptText = `${subjectText}, ${envText}, ${lightText}, ${styleText}`.replace(/, ,/g, ',').trim();
+    const catName = state.categories.find(c => c.id === category)?.name || 'غير معروف';
+
+    const newPrompt: DesignPrompt = {
+      id: `smart-${Date.now()}`,
+      category: category,
+      name: `نموذج ${catName} ذكي`,
+      prompt: finalPromptText,
+      logoPrompt: logoPrompt,
+      description: `توليد آلي من المختبر الذكي`,
+      status: 'pending',
+      selected: false,
+      metadata: { dimensions: '1024x1024', style: 'professional', estimatedTime: 45, priority: 'high' }
+    };
+
+    setState(prev => ({ ...prev, prompts: [newPrompt, ...prev.prompts] }));
+    setActiveTab('prompts');
+    alert("تمت إضافة النموذج الذكي بنجاح!");
+  };
+
   const simulateCompletion = () => {
     const selected = state.prompts.filter(p => p.selected && p.status !== 'completed');
-    if (selected.length === 0) {
-      alert("يرجى اختيار عناصر غير مكتملة لمحاكاتها.");
-      return;
-    }
+    if (selected.length === 0) return alert("يرجى اختيار عناصر غير مكتملة.");
     const placeholder = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
     setState(prev => ({
       ...prev,
       prompts: prev.prompts.map(p => (p.selected && p.status !== 'completed') ? { ...p, status: 'completed', resultImageUrl: placeholder } : p)
     }));
-    alert(`تمت محاكاة اكتمال ${selected.length} تصاميم.`);
   };
 
   const runAutomation = useCallback(async () => {
@@ -261,41 +304,29 @@ const App: React.FC = () => {
 
   const toggleAuto = () => {
     if (!state.isGenerating && stats.pending === 0 && stats.failed === 0 && stats.selected === 0) {
-      alert("لا توجد مهام معلقة للبدء.");
-      return;
+      return alert("لا توجد مهام معلقة للبدء.");
     }
     setState(prev => ({ ...prev, isGenerating: !prev.isGenerating }));
   };
 
   const downloadAll = async () => {
     const targetPrompts = state.prompts.filter(p => p.selected && p.status === 'completed' && p.resultImageUrl);
-
-    if (targetPrompts.length === 0) {
-      alert("يرجى تحديد التصاميم المكتملة المراد تحميلها أولاً.");
-      return;
-    }
-
-    if (!confirm(`هل تريد تحميل ${targetPrompts.length} صورة محددة تتابعياً؟`)) return;
+    if (targetPrompts.length === 0) return alert("يرجى تحديد التصاميم المكتملة أولاً.");
+    if (!confirm(`هل تريد تحميل ${targetPrompts.length} صورة تتابعياً؟`)) return;
 
     setIsDownloading(true);
     setDownloadProgress(0);
 
-    targetPrompts.forEach((p, idx) => {
-      setTimeout(() => {
-        downloadService.downloadPromptImage(p);
-        setDownloadProgress(Math.round(((idx + 1) / targetPrompts.length) * 100));
-        if (idx === targetPrompts.length - 1) {
-          setTimeout(() => {
-            setIsDownloading(false);
-            setDownloadProgress(0);
-          }, 1000);
-        }
-      }, idx * 700); 
-    });
+    for (let i = 0; i < targetPrompts.length; i++) {
+      downloadService.downloadPromptImage(targetPrompts[i]);
+      setDownloadProgress(Math.round(((i + 1) / targetPrompts.length) * 100));
+      await new Promise(r => setTimeout(r, 700));
+    }
+    setIsDownloading(false);
   };
 
   const resetAll = (targetStatus: 'pending' | 'failed' | 'completed' | 'all') => {
-    if (confirm(`هل أنت متأكد من إعادة تعيين الحالة المحددة؟`)) {
+    if (confirm(`إعادة تعيين الحالة المحددة؟`)) {
       setState(prev => ({
         ...prev,
         prompts: prev.prompts.map(p => 
@@ -340,7 +371,7 @@ const App: React.FC = () => {
       selected: false,
       metadata: { dimensions: '1024x1024', style: 'professional', estimatedTime: 45, priority: 'medium' }
     };
-    setState(prev => ({ ...prev, prompts: [...prev.prompts, prompt] }));
+    setState(prev => ({ ...prev, prompts: [prompt, ...prev.prompts] }));
     setShowAddModal(false);
     setNewPromptData({ category: state.categories[0]?.id || '', name: '', prompt: '', logoPrompt: '', description: '' });
   };
@@ -353,7 +384,6 @@ const App: React.FC = () => {
       try {
         const json = JSON.parse(event.target?.result as string);
         if (!Array.isArray(json)) throw new Error("JSON should be an array");
-        // FIX: Explicitly type as DesignPrompt[] to satisfy specific union status literals
         const valid: DesignPrompt[] = json.map(item => ({
           id: String(item.id || `imported-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`),
           category: String(item.category || 'pizza'),
@@ -373,7 +403,6 @@ const App: React.FC = () => {
       } catch (err) { alert("خطأ في قراءة ملف JSON."); }
     };
     reader.readAsText(file);
-    e.target.value = '';
   };
 
   const applyCategoryLogoPrompt = () => {
@@ -395,21 +424,13 @@ const App: React.FC = () => {
   };
 
   const handleDeleteSection = (id: string) => {
-    if (confirm("هل أنت متأكد من حذف هذا القسم؟ سيتم الاحتفاظ بالتصاميم المرتبطة به.")) {
+    if (confirm("حذف القسم؟")) {
       setState(prev => ({
         ...prev,
         categories: prev.categories.filter(c => c.id !== id)
       }));
       if (filter === id) setFilter('all');
     }
-  };
-
-  const handleModifySection = () => {
-    if (!editingSection) return;
-    setState(prev => ({
-      ...prev,
-      categories: prev.categories.map(c => c.id === editingSection.id ? editingSection : c)
-    }));
   };
 
   const exportPrompts = () => {
@@ -423,7 +444,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-[#f8fafc] text-slate-900" dir="rtl">
       <header className="bg-slate-900 text-white p-4 shadow-2xl sticky top-0 z-[100] border-b border-slate-700/50">
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
@@ -440,12 +461,12 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             <div className="hidden lg:flex items-center gap-3 bg-slate-800/50 px-4 py-1.5 rounded-full border border-slate-700">
               <div className="flex flex-col items-center">
-                <span className="text-[9px] text-slate-500 font-bold">DONE</span>
+                <span className="text-[9px] text-slate-500 font-bold uppercase">DONE</span>
                 <span className="text-xs font-black text-green-400">{stats.completed}</span>
               </div>
               <div className="w-px h-6 bg-slate-700"></div>
               <div className="flex flex-col items-center">
-                <span className="text-[9px] text-slate-500 font-bold">QUEUE</span>
+                <span className="text-[9px] text-slate-500 font-bold uppercase">QUEUE</span>
                 <span className="text-xs font-black text-yellow-400">{stats.pending}</span>
               </div>
             </div>
@@ -485,7 +506,7 @@ const App: React.FC = () => {
             <div className="space-y-4 relative">
               <div className="flex justify-between text-[11px] font-black uppercase text-slate-500">
                 <span>نسبة الإنجاز</span>
-                <span className="text-blue-600">{Math.round((stats.completed / (stats.total || 1)) * 100)}%</span>
+                <span className="text-blue-600 font-mono">{Math.round((stats.completed / (stats.total || 1)) * 100)}%</span>
               </div>
               <div className="h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200 shadow-inner p-0.5">
                 <div 
@@ -502,7 +523,7 @@ const App: React.FC = () => {
                 className="col-span-2 py-4 bg-slate-900 text-white font-black rounded-2xl flex items-center justify-center gap-3 hover:bg-black shadow-lg transition-transform active:scale-95 disabled:opacity-50"
               >
                 {isDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <DownloadCloud className="w-5 h-5" />} 
-                {isDownloading ? `جاري التحميل (${downloadProgress}%)` : (stats.selected > 0 ? `تحميل المختار (${stats.selected})` : 'تحميل جميع المكتمل')}
+                {isDownloading ? `جاري التحميل (${downloadProgress}%)` : (stats.selected > 0 ? `تحميل المختار (${stats.selected})` : 'تحميل المكتمل')}
               </button>
               <button onClick={(e) => { e.stopPropagation(); resetAll('failed'); }} className="py-3 text-[11px] font-black border-2 border-slate-100 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 text-slate-600">
                 <RotateCcw className="w-4 h-4" /> إعادة الفاشل
@@ -526,23 +547,24 @@ const App: React.FC = () => {
             {state.activeLogo && (
               <div className="mt-6 p-5 bg-slate-50 rounded-2xl border border-slate-100 space-y-6">
                 <div className="flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-                  <div className="w-16 h-16 bg-slate-100 rounded-lg p-2 flex items-center justify-center">
+                  <div className="w-16 h-16 bg-slate-100 rounded-lg p-2 flex items-center justify-center overflow-hidden">
                     <img src={state.activeLogo} className="max-w-full max-h-full object-contain" alt="Current Logo" />
                   </div>
-                  <div className="text-xs font-black text-slate-800">الشعار النشط</div>
+                  <div className="text-xs font-black text-slate-800 uppercase tracking-tighter">الشعار النشط</div>
                 </div>
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center text-[10px] font-black uppercase text-slate-500">
-                    <span>حجم الشعار</span>
+                  <div className="flex justify-between items-center text-[10px] font-black uppercase text-slate-500 tracking-tighter">
+                    <span>حجم الشعار الفعلي</span>
                     <span className="text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">{state.logoEffects.size}%</span>
                   </div>
-                  <input type="range" min="5" max="45" value={state.logoEffects.size} onChange={(e) => setState(prev => ({ ...prev, logoEffects: { ...prev.logoEffects, size: parseInt(e.target.value) }}))} className="w-full accent-purple-600 appearance-none bg-slate-200 h-1.5 rounded-lg" />
+                  <input type="range" min="5" max="45" value={state.logoEffects.size} onChange={(e) => setState(prev => ({ ...prev, logoEffects: { ...prev.logoEffects, size: parseInt(e.target.value) }}))} className="w-full accent-purple-600 appearance-none bg-slate-200 h-1.5 rounded-lg cursor-pointer" />
                   <div className="grid grid-cols-3 gap-2 p-2 bg-slate-200/50 rounded-xl">
                     {['top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'].map((pos: any) => (
                       <button 
                         key={pos} 
                         onClick={() => setState(prev => ({ ...prev, logoEffects: { ...prev.logoEffects, position: pos }}))} 
                         className={`h-8 rounded-lg transition-all ${state.logoEffects.position === pos ? 'bg-purple-600 shadow-lg' : 'bg-white hover:bg-slate-100'}`}
+                        title={pos}
                       ></button>
                     ))}
                   </div>
@@ -553,7 +575,7 @@ const App: React.FC = () => {
         </aside>
 
         <section className="lg:col-span-8 flex flex-col gap-6">
-          <div className="bg-slate-200/50 p-2 rounded-2xl flex gap-2 overflow-x-auto no-scrollbar scroll-smooth">
+          <div className="bg-slate-200/50 p-2 rounded-2xl flex gap-2 overflow-x-auto no-scrollbar scroll-smooth shadow-inner">
             <NavItem label="الكل" active={filter === 'all'} onClick={() => setFilter('all')} color="#64748b" count={state.prompts.length} />
             {state.categories.map((cat) => (
               <NavItem key={cat.id} label={cat.name} active={filter === cat.id} onClick={() => setFilter(cat.id)} color={cat.color} count={state.prompts.filter(p => p.category === cat.id).length} />
@@ -561,12 +583,17 @@ const App: React.FC = () => {
           </div>
 
           <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/50 border border-slate-200/60 overflow-hidden flex flex-col min-h-[700px]">
-            <div className="flex border-b border-slate-100 bg-slate-50/50">
-              {[{ id: 'prompts', label: 'النماذج الذكية', icon: Layers }, { id: 'control', label: 'إدارة المحتوى', icon: Settings }, { id: 'gallery', label: 'المعرض النهائي', icon: ImageIcon }].map((tab) => (
+            <div className="flex border-b border-slate-100 bg-slate-50/50 overflow-x-auto no-scrollbar">
+              {[
+                { id: 'prompts', label: 'النماذج الذكية', icon: Layers }, 
+                { id: 'lab', label: 'المختبر الذكي', icon: Sparkles },
+                { id: 'control', label: 'إدارة المحتوى', icon: Settings }, 
+                { id: 'gallery', label: 'المعرض النهائي', icon: ImageIcon }
+              ].map((tab) => (
                 <button 
                   key={tab.id} 
                   onClick={() => setActiveTab(tab.id as any)} 
-                  className={`flex-1 py-5 text-sm font-black flex items-center justify-center gap-3 transition-all ${activeTab === tab.id ? 'text-blue-600 bg-white border-b-2 border-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                  className={`flex-1 min-w-[120px] py-5 text-sm font-black flex items-center justify-center gap-3 transition-all ${activeTab === tab.id ? 'text-blue-600 bg-white border-b-2 border-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                 >
                   <tab.icon className="w-4 h-4" />
                   {tab.label}
@@ -592,12 +619,25 @@ const App: React.FC = () => {
                     </button>
                   </div>
 
+                  {errorMsg && (
+                    <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-4 text-red-600 animate-in slide-in-from-top-2">
+                      <AlertCircle className="w-6 h-6 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs font-black">{errorMsg}</p>
+                        {errorMsg.includes("Quota") && (
+                          <p className="text-[10px] mt-1 font-bold">تلميح: جرب زيادة "التأخير الزمني" في الإعدادات.</p>
+                        )}
+                      </div>
+                      <button onClick={() => setErrorMsg(null)} className="p-1 hover:bg-red-100 rounded-full transition-colors"><Trash2 className="w-4 h-4 rotate-45" /></button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-3">
                     {filteredPrompts.map((p) => {
                       const globalIdx = state.prompts.findIndex(item => item.id === p.id);
                       const cat = state.categories.find(c => c.id === p.category);
                       return (
-                        <div key={p.id} className={`group p-4 rounded-3xl border transition-all flex items-center gap-5 ${p.selected ? 'bg-blue-50/40 border-blue-200' : 'bg-white border-slate-100 hover:border-slate-200'}`}>
+                        <div key={p.id} className={`group p-4 rounded-3xl border transition-all flex items-center gap-5 ${p.selected ? 'bg-blue-50/40 border-blue-200 shadow-sm' : 'bg-white border-slate-100 hover:border-slate-200'}`}>
                           <input 
                             type="checkbox" 
                             checked={p.selected} 
@@ -613,7 +653,9 @@ const App: React.FC = () => {
                               <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${p.status === 'completed' ? 'bg-green-100 text-green-700' : p.status === 'failed' ? 'bg-red-100 text-red-700' : p.status === 'generating' ? 'bg-blue-600 text-white animate-pulse' : 'bg-slate-100 text-slate-500'}`}>
                                 {p.status}
                               </span>
-                              <p className="text-[11px] text-slate-400 truncate italic font-medium">{p.prompt}</p>
+                              <p className="text-[11px] text-slate-400 truncate italic font-medium">
+                                {p.status === 'failed' ? <span className="text-red-500 font-bold">{p.error}</span> : p.prompt}
+                              </p>
                             </div>
                           </div>
                           <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -631,13 +673,53 @@ const App: React.FC = () => {
                 </div>
               )}
 
+              {activeTab === 'lab' && (
+                <div className="flex flex-col gap-10 animate-in fade-in">
+                  <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-8 rounded-[2.5rem] border border-blue-100 shadow-sm relative overflow-hidden">
+                    <Sparkles className="absolute -top-6 -right-6 w-32 h-32 text-blue-200/50 rotate-12" />
+                    <div className="relative">
+                      <h3 className="text-2xl font-black text-slate-900 mb-2 flex items-center gap-3"><Wand2 className="w-6 h-6 text-blue-600" /> المختبر الذكي للبرومبتات</h3>
+                      <p className="text-sm text-slate-600 font-medium mb-8">صمم برومبتات احترافية بمجرد دمج المكونات.</p>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-6">
+                          <div>
+                            <label className="text-[10px] font-black text-slate-500 block mb-3 uppercase tracking-widest">العنصر</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {state.template.subjects.map(s => (
+                                <button key={s.id} onClick={() => setLabSelection({...labSelection, subject: s.id})} className={`px-4 py-3 rounded-2xl text-[11px] font-black border transition-all ${labSelection.subject === s.id ? 'bg-blue-600 text-white border-blue-600 shadow-lg scale-105' : 'bg-white text-slate-600 border-slate-200'}`}>{s.label}</button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black text-slate-500 block mb-3 uppercase tracking-widest">البيئة</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {state.template.environments.map(e => (
+                                <button key={e.id} onClick={() => setLabSelection({...labSelection, environment: e.id})} className={`px-4 py-3 rounded-2xl text-[11px] font-black border transition-all ${labSelection.environment === e.id ? 'bg-blue-600 text-white border-blue-600 shadow-lg scale-105' : 'bg-white text-slate-600 border-slate-200'}`}>{e.label}</button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-6">
+                          <div>
+                            <label className="text-[10px] font-black text-slate-500 block mb-3 uppercase tracking-widest text-blue-600">دمج الشعار</label>
+                            <textarea value={labSelection.logoPrompt} onChange={(e) => setLabSelection({...labSelection, logoPrompt: e.target.value})} className="w-full px-5 py-4 border border-blue-200 rounded-[1.5rem] bg-white text-xs font-medium outline-none shadow-sm focus:ring-2 ring-blue-500/20" rows={3} />
+                          </div>
+                          <button onClick={generateFromLab} className="w-full px-12 py-5 bg-slate-900 text-white font-black rounded-2xl shadow-2xl hover:bg-black transition-all active:scale-95 flex items-center justify-center gap-3">
+                            <Sparkles className="w-5 h-5 text-blue-400" /> توليد البرومبت الذكي
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'control' && (
                 <div className="space-y-10 animate-in fade-in">
-                  <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100">
-                    <div className="flex justify-between items-center mb-6">
-                      <h4 className="font-black text-slate-800 flex items-center gap-3"><Palette className="w-5 h-5 text-green-600" /> تنظيم الأقسام</h4>
-                      <button onClick={() => setShowSectionModal(true)} className="px-6 py-2.5 bg-green-600 text-white rounded-2xl text-[10px] font-black hover:bg-green-700 shadow-xl transition-all">إضافة تصنيف جديد</button>
-                    </div>
+                  <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 shadow-sm">
+                    <h4 className="font-black text-slate-800 flex items-center gap-3 mb-6"><Palette className="w-5 h-5 text-green-600" /> تنظيم الأقسام</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {state.categories.map(cat => (
                         <div key={cat.id} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
@@ -645,47 +727,20 @@ const App: React.FC = () => {
                             <div className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color }}></div>
                             <span className="text-sm font-black text-slate-700">{cat.name}</span>
                           </div>
-                          <div className="flex gap-1">
-                            <button onClick={() => setEditingSection(cat)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => handleDeleteSection(cat.id)} className="p-2 hover:bg-red-50 rounded-lg text-slate-400 transition-colors"><Trash className="w-3.5 h-3.5" /></button>
-                          </div>
+                          <button onClick={() => handleDeleteSection(cat.id)} className="p-2 hover:bg-red-50 rounded-lg text-slate-400 transition-colors"><Trash className="w-3.5 h-3.5" /></button>
                         </div>
                       ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                    <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 shadow-sm">
-                      <h4 className="font-black mb-4 flex items-center gap-3 text-blue-600"><Upload className="w-5 h-5" /> استيراد بيانات JSON</h4>
-                      <div className="flex items-center gap-6 mb-6 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={bulkImportMode === 'append'} onChange={() => setBulkImportMode('append')} /> إلحاق</label>
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={bulkImportMode === 'overwrite'} onChange={() => setBulkImportMode('overwrite')} /> استبدال كامل</label>
-                      </div>
-                      <label className="block border-2 border-dashed border-slate-300 rounded-[1.5rem] p-10 text-center hover:bg-white cursor-pointer transition-all">
-                        <FileJson className="w-10 h-10 mx-auto mb-3 text-slate-300" />
-                        <p className="text-xs font-black text-slate-600">اختر ملف JSON للرفع</p>
-                        <input type="file" accept=".json" onChange={handleBulkImport} className="hidden" />
-                      </label>
-                    </div>
-
-                    <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 flex flex-col gap-4 shadow-sm">
-                      <h4 className="font-black flex items-center gap-3 text-red-600 mb-2"><Trash2 className="w-5 h-5" /> إدارة البيانات الكلية</h4>
-                      <button onClick={clearAllPrompts} className="w-full py-4 bg-red-600 text-white font-black rounded-2xl text-xs shadow-xl hover:bg-red-700 transition-all">حذف جميع البرومبتات</button>
-                      <button onClick={() => resetAll('all')} className="w-full py-4 border-2 border-slate-200 bg-white text-slate-600 font-black rounded-2xl text-xs hover:bg-slate-50 transition-all">تصفير حالة الجميع</button>
-                      <button onClick={simulateCompletion} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl text-xs hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 shadow-xl">
-                        <FlaskConical className="w-4 h-4" /> محاكاة اكتمال المختار (للاختبار)
+                      <button onClick={() => setShowSectionModal(true)} className="p-4 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-300 transition-all font-black text-xs flex items-center justify-center gap-2">
+                        <PlusCircle className="w-4 h-4" /> إضافة قسم
                       </button>
                     </div>
                   </div>
 
                   <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 shadow-sm">
-                    <h4 className="font-black mb-6 flex items-center gap-3 text-purple-600"><Type className="w-5 h-5" /> تحديث برومبت الشعار لقسم كامل</h4>
-                    <div className="flex flex-col sm:flex-row gap-4">
-                      <select value={categoryLogoUpdate.cat} onChange={(e) => setCategoryLogoUpdate({...categoryLogoUpdate, cat: e.target.value})} className="px-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-black outline-none shadow-sm">
-                        {state.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                      <input type="text" value={categoryLogoUpdate.prompt} onChange={(e) => setCategoryLogoUpdate({...categoryLogoUpdate, prompt: e.target.value})} placeholder="أدخل برومبت الشعار الجديد هنا..." className="flex-1 px-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-medium outline-none shadow-sm" />
-                      <button onClick={applyCategoryLogoPrompt} className="px-8 py-4 bg-purple-600 text-white font-black rounded-2xl text-xs shadow-xl hover:bg-purple-700 transition-all">تحديث الآن</button>
+                    <h4 className="font-black mb-4 flex items-center gap-3 text-red-600 uppercase"><Trash2 className="w-5 h-5" /> إدارة البيانات الكلية</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <button onClick={clearAllPrompts} className="py-4 bg-red-600 text-white font-black rounded-2xl text-xs shadow-xl hover:bg-red-700 transition-all">حذف جميع البرومبتات</button>
+                      <button onClick={() => resetAll('all')} className="py-4 border-2 border-slate-200 bg-white text-slate-600 font-black rounded-2xl text-xs hover:bg-slate-50 transition-all">تصفير حالة الجميع</button>
                     </div>
                   </div>
                 </div>
@@ -696,7 +751,7 @@ const App: React.FC = () => {
                   <div className="flex justify-between items-center bg-slate-900 text-white p-6 rounded-[2rem] shadow-2xl">
                     <div>
                       <h3 className="font-black text-xl">معرض النتائج المكتملة</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">المحدد والمكتمل سيتم تحميله تتابعياً</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">يتم التحميل تتابعياً لتجنب الحظر</p>
                     </div>
                     <button 
                       onClick={downloadAll} 
@@ -709,9 +764,8 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {state.prompts.filter(p => p.status === 'completed' && p.resultImageUrl).map(p => {
-                      return (
-                        <div key={p.id} className={`relative group aspect-square rounded-[2rem] overflow-hidden shadow-xl transition-all duration-300 ${p.selected ? 'ring-4 ring-blue-500 scale-95 border-blue-500' : 'border-4 border-white hover:scale-105'} bg-slate-100`}>
+                    {state.prompts.filter(p => p.status === 'completed' && p.resultImageUrl).map(p => (
+                        <div key={p.id} className={`relative group aspect-square rounded-[2rem] overflow-hidden shadow-xl transition-all duration-300 ${p.selected ? 'ring-4 ring-blue-500 scale-95' : 'border-4 border-white hover:scale-105'} bg-slate-100`}>
                           <img src={p.resultImageUrl} className="w-full h-full object-cover" loading="lazy" alt={p.name} />
                           <div className="absolute top-3 right-3 z-20">
                             <input 
@@ -723,14 +777,13 @@ const App: React.FC = () => {
                           </div>
                           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
                             <p className="text-[10px] text-white font-black truncate mb-2">{p.name}</p>
-                            <button onClick={(e) => { e.stopPropagation(); downloadService.downloadPromptImage(p); }} className="w-full bg-white text-slate-900 text-[10px] font-black py-2 rounded-xl text-center hover:bg-blue-600 hover:text-white transition-all">تحميل</button>
+                            <button onClick={(e) => { e.stopPropagation(); downloadService.downloadPromptImage(p); }} className="w-full bg-white text-slate-900 text-[10px] font-black py-2 rounded-xl text-center">تحميل</button>
                           </div>
                         </div>
-                      );
-                    })}
+                      ))}
                   </div>
                   {stats.completed === 0 && (
-                    <div className="text-center py-32 text-slate-400 font-black text-sm uppercase tracking-widest">لا توجد صور منجزة في المعرض حالياً</div>
+                    <div className="text-center py-32 text-slate-400 font-black text-sm uppercase tracking-widest">المعرض فارغ حالياً</div>
                   )}
                 </div>
               )}
@@ -739,95 +792,47 @@ const App: React.FC = () => {
         </section>
       </main>
 
-      <footer className="bg-white border-t border-slate-200 p-4 text-[10px] flex justify-between items-center text-slate-500 font-bold uppercase tracking-widest">
+      <footer className="bg-white border-t border-slate-200 p-4 text-[10px] flex justify-between items-center text-slate-500 font-bold uppercase tracking-widest shadow-inner">
         <div className="flex gap-8">
-          <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${state.settings.model === 'gemini-3-pro-image-preview' ? 'bg-purple-500' : 'bg-blue-500'}`}></div> Model: {state.settings.model.split('-')[2].toUpperCase()} {state.settings.imageQuality}</div>
           <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${state.isGenerating ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></div> Automation: {state.isGenerating ? 'Active' : 'Idle'}</div>
+          <div className="flex items-center gap-2 font-mono">Delay: {state.settings.delayBetweenGenerations}ms</div>
         </div>
-        <div className="flex items-center gap-1">NSDEV <span className="text-blue-500">Branding Mastery</span> © 2024</div>
+        <div>NSDEV <span className="text-blue-500">MOCKUPS</span> © 2024</div>
       </footer>
-
-      {showAddModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
-          <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
-              <h3 className="font-black text-xl flex items-center gap-3"><PlusCircle className="w-6 h-6 text-blue-400" /> إضافة نموذج تصميم جديد</h3>
-              <button onClick={() => setShowAddModal(false)} className="hover:bg-white/10 rounded-full p-2"><Trash2 className="w-6 h-6 rotate-45" /></button>
-            </div>
-            <div className="p-8 space-y-6 max-h-[80vh] overflow-y-auto text-right" dir="rtl">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase">اختيار القسم</label>
-                  <select value={newPromptData.category} onChange={(e) => setNewPromptData({...newPromptData, category: e.target.value})} className="w-full px-5 py-3 border border-slate-200 rounded-2xl font-black text-sm bg-slate-50">
-                    {state.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase">اسم التصميم</label>
-                  <input type="text" value={newPromptData.name} onChange={(e) => setNewPromptData({...newPromptData, name: e.target.value})} placeholder="مثال: برجر دجاج كرسبي" className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-sm font-bold bg-slate-50" />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase">وصف المشهد (Mockup Prompt)</label>
-                <textarea rows={3} value={newPromptData.prompt} onChange={(e) => setNewPromptData({...newPromptData, prompt: e.target.value})} placeholder="صف مشهد التصميم..." className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-xs font-medium bg-slate-50 resize-none" />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase text-blue-600">وصف دمج الشعار (Logo Integration Prompt)</label>
-                <textarea rows={2} value={newPromptData.logoPrompt} onChange={(e) => setNewPromptData({...newPromptData, logoPrompt: e.target.value})} placeholder="كيف سيظهر الشعار على المنتج؟ (مثلاً: مطبوع بلمعة ذهبية على العلبة)" className="w-full px-5 py-3 border border-blue-100 rounded-2xl text-xs font-medium bg-blue-50/30 resize-none" />
-              </div>
-              <button onClick={addIndividualPrompt} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all text-sm mt-4">إدراج في قائمة المهام</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {editingPrompt && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
-          <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden">
-            <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
-              <h3 className="font-black text-xl flex items-center gap-3"><Edit2 className="w-6 h-6 text-blue-400" /> تعديل بيانات التصميم</h3>
-              <button onClick={() => setEditingPrompt(null)} className="hover:bg-white/10 rounded-full p-2"><RotateCcw className="w-6 h-6 rotate-45" /></button>
-            </div>
-            <div className="p-8 space-y-6 text-right" dir="rtl">
-              <div>
-                <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase">اسم التصميم</label>
-                <input type="text" value={editingPrompt.name} onChange={(e) => setEditingPrompt({...editingPrompt, name: e.target.value})} className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-sm font-black bg-slate-50" />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase">وصف المشهد (Mockup Prompt)</label>
-                <textarea rows={3} value={editingPrompt.prompt} onChange={(e) => setEditingPrompt({...editingPrompt, prompt: e.target.value})} className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-xs font-medium bg-slate-50 resize-none" />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-500 block mb-2 uppercase text-blue-600">وصف دمج الشعار (Logo Integration Prompt)</label>
-                <textarea rows={2} value={editingPrompt.logoPrompt} onChange={(e) => setEditingPrompt({...editingPrompt, logoPrompt: e.target.value})} placeholder="كيف سيظهر الشعار على المنتج؟" className="w-full px-5 py-3 border border-blue-100 rounded-2xl text-xs font-medium bg-blue-50/30 resize-none" />
-              </div>
-              <div className="flex gap-4 mt-6">
-                <button onClick={() => updatePrompt(editingPrompt!)} className="flex-1 py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all">حفظ التغييرات</button>
-                <button onClick={() => setEditingPrompt(null)} className="flex-1 py-4 bg-slate-100 text-slate-600 font-black rounded-2xl hover:bg-slate-200 transition-all active:scale-95">إلغاء</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showSettings && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden">
             <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
-              <h2 className="text-xl font-black flex items-center gap-3"><Settings className="w-6 h-6 text-blue-400" /> الإعدادات المتقدمة</h2>
-              <button onClick={() => { setShowSettings(false); setErrorMsg(null); }} className="hover:bg-white/10 rounded-full p-2"><RotateCcw className="w-6 h-6 rotate-45" /></button>
+              <h2 className="text-xl font-black flex items-center gap-3"><Settings className="w-6 h-6 text-blue-400" /> الإعدادات</h2>
+              <button onClick={() => setShowSettings(false)} className="hover:bg-white/10 rounded-full p-2"><RotateCcw className="w-6 h-6 rotate-45" /></button>
             </div>
             <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto">
               {errorMsg && <div className="bg-red-50 text-red-600 p-5 rounded-3xl text-xs font-bold border border-red-100">{errorMsg}</div>}
-              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-6">
-                <span className="text-[10px] font-black text-slate-500 flex items-center gap-2 uppercase"><Key className="w-3 h-3" /> نموذج الذكاء الاصطناعي</span>
-                <div className="flex bg-slate-200/50 p-1.5 rounded-2xl">
-                   <button onClick={() => setState(prev => ({ ...prev, settings: { ...prev.settings, model: 'gemini-2.5-flash-image' }}))} className={`flex-1 py-3 text-[10px] font-black rounded-xl transition-all ${state.settings.model === 'gemini-2.5-flash-image' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-500'}`}>FLASH (سريع)</button>
-                   <button onClick={() => setState(prev => ({ ...prev, settings: { ...prev.settings, model: 'gemini-3-pro-image-preview' }}))} className={`flex-1 py-3 text-[10px] font-black rounded-xl transition-all ${state.settings.model === 'gemini-3-pro-image-preview' ? 'bg-white text-purple-600 shadow-md' : 'text-slate-500'}`}>PRO (احترافي)</button>
+              
+              <div className="space-y-4">
+                <label className="text-[10px] font-black text-slate-500 block uppercase tracking-widest flex items-center gap-2"><Clock className="w-3 h-3" /> التأخير بين عمليات التوليد (ms)</label>
+                <div className="flex items-center gap-4">
+                  <input 
+                    type="range" min="1000" max="10000" step="500" 
+                    value={state.settings.delayBetweenGenerations} 
+                    onChange={(e) => setState(prev => ({ ...prev, settings: { ...prev.settings, delayBetweenGenerations: parseInt(e.target.value) }}))}
+                    className="flex-1 accent-blue-600"
+                  />
+                  <span className="text-sm font-black font-mono w-16 text-center">{state.settings.delayBetweenGenerations}</span>
                 </div>
-                {state.settings.model === 'gemini-3-pro-image-preview' ? <button onClick={handleApiKeySelect} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-black text-xs shadow-xl active:scale-95">اختيار مفتاح المشروع</button> : <input type="password" value={state.settings.apiKey} onChange={(e) => setState(prev => ({ ...prev, settings: { ...prev.settings, apiKey: e.target.value } }))} className="w-full px-5 py-4 border border-slate-200 rounded-2xl outline-none text-xs" placeholder="API Key" />}
+                <p className="text-[9px] text-slate-400 font-bold">زيادة هذا الرقم يساعد في تجنب أخطاء Quota (429).</p>
               </div>
-              <button onClick={() => setShowSettings(false)} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl shadow-2xl active:scale-95 transition-all text-sm">حفظ الإعدادات</button>
+
+              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-6">
+                <span className="text-[10px] font-black text-slate-500 flex items-center gap-2 uppercase tracking-widest"><Key className="w-3 h-3" /> نموذج الذكاء الاصطناعي</span>
+                <div className="flex bg-slate-200/50 p-1.5 rounded-2xl shadow-inner">
+                   <button onClick={() => setState(prev => ({ ...prev, settings: { ...prev.settings, model: 'gemini-2.5-flash-image' }}))} className={`flex-1 py-3 text-[10px] font-black rounded-xl transition-all ${state.settings.model === 'gemini-2.5-flash-image' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-500'}`}>FLASH</button>
+                   <button onClick={() => setState(prev => ({ ...prev, settings: { ...prev.settings, model: 'gemini-3-pro-image-preview' }}))} className={`flex-1 py-3 text-[10px] font-black rounded-xl transition-all ${state.settings.model === 'gemini-3-pro-image-preview' ? 'bg-white text-purple-600 shadow-md' : 'text-slate-500'}`}>PRO</button>
+                </div>
+                {state.settings.model === 'gemini-3-pro-image-preview' ? <button onClick={handleApiKeySelect} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-black text-xs shadow-xl active:scale-95">اختيار مفتاح المشروع</button> : <input type="password" value={state.settings.apiKey} onChange={(e) => setState(prev => ({ ...prev, settings: { ...prev.settings, apiKey: e.target.value } }))} className="w-full px-5 py-4 border border-slate-200 rounded-2xl outline-none text-xs bg-white shadow-inner" placeholder="API Key" />}
+              </div>
+              <button onClick={() => setShowSettings(false)} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl shadow-2xl active:scale-95 transition-all text-sm">حفظ</button>
             </div>
           </div>
         </div>
@@ -838,11 +843,48 @@ const App: React.FC = () => {
           <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-8">
             <h3 className="text-xl font-black mb-6 text-green-600">إضافة قسم جديد</h3>
             <div className="space-y-6">
-              <input type="text" value={newSection.name} onChange={(e) => setNewSection({...newSection, name: e.target.value})} placeholder="اسم القسم..." className="w-full px-5 py-4 border border-slate-200 rounded-2xl bg-slate-50 font-black text-sm outline-none" />
+              <input type="text" value={newSection.name} onChange={(e) => setNewSection({...newSection, name: e.target.value})} placeholder="اسم القسم..." className="w-full px-5 py-4 border border-slate-200 rounded-2xl bg-slate-50 font-black text-sm outline-none shadow-inner" />
               <input type="color" value={newSection.color} onChange={(e) => setNewSection({...newSection, color: e.target.value})} className="w-full h-14 border-4 border-white rounded-2xl shadow-sm cursor-pointer" />
               <div className="flex gap-4">
-                <button onClick={() => { handleAddSection(); setShowSectionModal(false); }} className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl shadow-xl transition-all">إضافة</button>
+                <button onClick={() => { handleAddSection(); setShowSectionModal(false); }} className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl shadow-xl transition-all active:scale-95">إضافة</button>
                 <button onClick={() => setShowSectionModal(false)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-black text-slate-600">إلغاء</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
+          <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
+              <h3 className="font-black text-xl">إضافة نموذج تصميم</h3>
+              <button onClick={() => setShowAddModal(false)} className="hover:bg-white/10 rounded-full p-2"><Trash2 className="w-6 h-6 rotate-45" /></button>
+            </div>
+            <div className="p-8 space-y-6">
+              <input type="text" value={newPromptData.name} onChange={(e) => setNewPromptData({...newPromptData, name: e.target.value})} placeholder="اسم التصميم" className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-sm font-bold bg-slate-50 outline-none" />
+              <textarea rows={3} value={newPromptData.prompt} onChange={(e) => setNewPromptData({...newPromptData, prompt: e.target.value})} placeholder="وصف المشهد" className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-xs font-medium bg-slate-50 resize-none outline-none" />
+              <textarea rows={2} value={newPromptData.logoPrompt} onChange={(e) => setNewPromptData({...newPromptData, logoPrompt: e.target.value})} placeholder="كيفية دمج الشعار" className="w-full px-5 py-3 border border-blue-100 rounded-2xl text-xs font-medium bg-blue-50/30 resize-none outline-none" />
+              <button onClick={addIndividualPrompt} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all text-sm mt-4">إدراج</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingPrompt && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
+          <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden">
+            <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
+              <h3 className="font-black text-xl">تعديل التصميم</h3>
+              <button onClick={() => setEditingPrompt(null)} className="hover:bg-white/10 rounded-full p-2"><RotateCcw className="w-6 h-6 rotate-45" /></button>
+            </div>
+            <div className="p-8 space-y-6">
+              <input type="text" value={editingPrompt.name} onChange={(e) => setEditingPrompt({...editingPrompt, name: e.target.value})} className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-sm font-black bg-slate-50 outline-none" />
+              <textarea rows={3} value={editingPrompt.prompt} onChange={(e) => setEditingPrompt({...editingPrompt, prompt: e.target.value})} className="w-full px-5 py-3 border border-slate-200 rounded-2xl text-xs font-medium bg-slate-50 resize-none outline-none" />
+              <textarea rows={2} value={editingPrompt.logoPrompt} onChange={(e) => setEditingPrompt({...editingPrompt, logoPrompt: e.target.value})} placeholder="وصف دمج الشعار..." className="w-full px-5 py-3 border border-blue-100 rounded-2xl text-xs font-medium bg-blue-50/30 resize-none outline-none shadow-inner" />
+              <div className="flex gap-4 mt-6">
+                <button onClick={() => updatePrompt(editingPrompt!)} className="flex-1 py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all">حفظ</button>
+                <button onClick={() => setEditingPrompt(null)} className="flex-1 py-4 bg-slate-100 text-slate-600 font-black rounded-2xl hover:bg-slate-200 transition-all active:scale-95">إلغاء</button>
               </div>
             </div>
           </div>

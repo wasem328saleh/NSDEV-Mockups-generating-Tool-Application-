@@ -21,14 +21,15 @@ export const imageProcessor = {
           // 1. Draw Mockup
           ctx.drawImage(img, 0, 0);
 
-          // 2. Calculate Logo Dimensions
-          const scale = effects.size / 100;
-          const logoW = img.width * scale;
+          // 2. Calculate Logo Dimensions based on target scale (responsive to image size)
+          // effects.size represents % of the shorter edge
+          const baseDim = Math.min(img.width, img.height);
+          const logoW = baseDim * (effects.size / 100);
           const logoH = (logo.height / logo.width) * logoW;
 
           // 3. Calculate Position
           let x = 0, y = 0;
-          const padding = 40;
+          const padding = baseDim * 0.05; // 5% responsive padding
 
           switch (effects.position) {
             case 'top-left': x = padding; y = padding; break;
@@ -49,15 +50,15 @@ export const imageProcessor = {
           ctx.rotate((effects.rotation * Math.PI) / 180);
           ctx.translate(-(x + logoW / 2), -(y + logoH / 2));
 
-          // 5. Apply Shadow
-          if (effects.shadow.enabled) {
-            ctx.shadowBlur = effects.shadow.blur;
-            ctx.shadowColor = effects.shadow.color;
-            ctx.shadowOffsetX = effects.shadow.offset.x;
-            ctx.shadowOffsetY = effects.shadow.offset.y;
+          // 5. Apply Shadow (Soft outer shadow for realism)
+          if (effects.shadow.enabled || true) { // Enabled by default for professional look
+            ctx.shadowBlur = effects.shadow.enabled ? effects.shadow.blur : 15;
+            ctx.shadowColor = effects.shadow.enabled ? effects.shadow.color : 'rgba(0,0,0,0.4)';
+            ctx.shadowOffsetX = effects.shadow.enabled ? effects.shadow.offset.x : 5;
+            ctx.shadowOffsetY = effects.shadow.enabled ? effects.shadow.offset.y : 5;
           }
 
-          // 6. Glow Effect (using shadow stack)
+          // 6. Glow Effect
           if (effects.glow.enabled) {
             ctx.shadowBlur = effects.glow.strength;
             ctx.shadowColor = effects.glow.color;

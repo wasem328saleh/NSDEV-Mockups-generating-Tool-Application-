@@ -25,6 +25,7 @@ export interface DesignPrompt {
   resultImageUrl?: string;
   error?: string;
   metadata: PromptMetadata;
+  selected: boolean; // Added for Phase 4 selection management
 }
 
 export interface LogoEffects {

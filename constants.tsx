@@ -1,5 +1,5 @@
 
-import { CategoryInfo, LogoEffects, AppSettings } from './types';
+import { CategoryInfo, LogoEffects, AppSettings, DesignPrompt } from './types';
 
 export const INITIAL_CATEGORIES: CategoryInfo[] = [
   { id: 'pizza', name: 'بيتزا', color: '#e74c3c' },
@@ -46,8 +46,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pauseOnError: true,
 };
 
-export const generateInitialPrompts = (categories: CategoryInfo[]) => {
-  const prompts: any[] = [];
+export const generateInitialPrompts = (categories: CategoryInfo[]): DesignPrompt[] => {
+  const prompts: DesignPrompt[] = [];
   const counts: Record<string, number> = { pizza: 30, burger: 23, shawarma: 24, chicken: 23, desserts: 28 };
 
   categories.forEach(cat => {
@@ -61,6 +61,7 @@ export const generateInitialPrompts = (categories: CategoryInfo[]) => {
         logoPrompt: `Integrate a modern, minimalist restaurant logo onto the front of the packaging, ensuring it looks naturally embossed or printed.`,
         description: `تصميم احترافي لقسم ${cat.name}`,
         status: 'pending',
+        selected: false,
         metadata: {
           dimensions: '1024x1024',
           style: 'professional',
